@@ -14,6 +14,8 @@ Opinionated way of doing pg-boss queues and workers in Effect applications.
 pnpm add pgboss-effect effect pg-boss
 ```
 
+This package is ESM-only.
+
 ## Define a queue
 
 ```ts
