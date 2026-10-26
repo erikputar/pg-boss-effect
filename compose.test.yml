@@ -1,0 +1,18 @@
+name: pgboss-effect-test
+
+services:
+  postgres:
+    restart: no
+    container_name: "pgboss-effect-postgres-test"
+    image: postgres:17.4
+    ports:
+      - "5435:5432"
+    environment:
+      POSTGRES_USER: "pgboss"
+      POSTGRES_PASSWORD: "pgboss"
+      POSTGRES_DB: "pgboss"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pgboss -d pgboss"]
+      interval: 1s
+      timeout: 5s
+      retries: 30

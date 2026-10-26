@@ -158,7 +158,7 @@ const objectOptions: PgBossOptions = {
   user: "pgboss",
   password: "pgboss",
   host: "localhost",
-  port: 5434,
+  port: 5435,
   database: "pgboss",
 };
 
