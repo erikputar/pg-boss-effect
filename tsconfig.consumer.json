@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "lib": ["ESNext"],
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "pgboss-effect": ["./dist/index.d.ts"]
+    }
+  },
+  "include": ["fixtures"]
+}

@@ -47,7 +47,7 @@
     "lint": "oxlint --type-check --type-aware",
     "format": "biome check .",
     "format:fix": "biome check --write .",
-    "check": "pnpm run lint && pnpm run format && pnpm run build && pnpm run test:types && publint && attw --pack .",
+    "check": "pnpm run lint && pnpm run format && pnpm run build && pnpm run test:types && publint && attw --pack . --profile esm-only",
     "test": "vitest run",
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
