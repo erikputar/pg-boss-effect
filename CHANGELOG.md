@@ -1,5 +1,11 @@
 # pgboss-effect
 
+## 0.1.1
+
+### Patch Changes
+
+- 6d63381: Document that the package is ESM-only.
+
 ## 0.1.0
 
 ### Minor Changes
