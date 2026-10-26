@@ -39,5 +39,4 @@ jobs:
           pr-title: "chore: release"
           create-github-releases: true
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: true
