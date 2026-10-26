@@ -1,5 +1,11 @@
 # pgboss-effect
 
+## 0.1.2
+
+### Patch Changes
+
+- 118c341: Update the package description and README.
+
 ## 0.1.1
 
 ### Patch Changes
