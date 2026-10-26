@@ -1,6 +1,6 @@
 # pgboss-effect
 
-Opinionated way of doing pg-boss queues and workers in Effect applications.
+Simple and type-safe pg-boss queues and workers in Effect.
 
 ## Requirements
 
@@ -129,6 +129,11 @@ layer or `Effect.scoped`.
 - `worker.toLayer` — registers the worker
 
 The pg-boss internals used by `Queue` and `Worker` are not exported.
+
+## Releases
+
+See [docs/release.md](https://github.com/erikputar/pg-boss-effect/blob/main/docs/release.md)
+for the release process.
 
 ## License
 
