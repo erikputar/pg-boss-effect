@@ -1,4 +1,5 @@
 {
+  "ignorePatterns": ["fixtures/**"],
   "plugins": ["eslint", "typescript", "unicorn", "import", "oxc", "promise"],
   "categories": {
     "correctness": "error",
