@@ -20,10 +20,8 @@ const WorkerLive = worker.toLayer.pipe(
   Layer.provideMerge(PgBossLive),
 );
 
-const send = Effect.scoped(
-  queue.send({ message: "hello" }).pipe(Effect.provide(QueueLive)),
-);
+const send = queue.send({ message: "hello" }).pipe(Effect.provide(QueueLive));
 
-const workerProgram = Effect.scoped(Layer.launch(WorkerLive));
+const workerProgram = Layer.launch(WorkerLive);
 
 export { send, workerProgram };

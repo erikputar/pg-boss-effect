@@ -25,7 +25,7 @@ export const EmailPayload = Schema.Struct({
   subject: Schema.String,
 });
 
-export const Emails = Queue.make("emails", {
+export const EmailsQueue = Queue.make("emails", {
   payload: EmailPayload,
   queueOptions: { retryLimit: 3 },
 });
@@ -39,16 +39,16 @@ The payload schema encodes jobs when sending and decodes them in workers.
 import { Effect, Layer } from "effect";
 import { PgBoss } from "pgboss-effect";
 
-import { Emails } from "./emails";
+import { EmailsQueue } from "./emails";
 
 const PgBossLive = PgBoss.layer({
   connectionString: "postgresql://postgres:postgres@localhost:5432/app",
 });
 
-const QueueLive = Emails.toLayer.pipe(Layer.provideMerge(PgBossLive));
+const QueueLive = EmailsQueue.toLayer.pipe(Layer.provideMerge(PgBossLive));
 
 const program = Effect.gen(function* () {
-  const jobId = yield* Emails.send({
+  const jobId = yield* EmailsQueue.send({
     to: "erik@example.com",
     subject: "Hello",
   });
@@ -56,11 +56,11 @@ const program = Effect.gen(function* () {
   yield* Effect.log(`queued ${jobId}`);
 }).pipe(Effect.provide(QueueLive));
 
-await Effect.runPromise(Effect.scoped(program));
+Effect.runFork(program);
 ```
 
-`Emails.toLayer` creates the queue. `PgBoss.layer` owns the pg-boss instance and
-its lifetime.
+`EmailsQueue.toLayer` creates the queue. `PgBoss.layer` owns the pg-boss
+instance and its lifetime.
 
 ## Run a worker
 
@@ -68,12 +68,15 @@ its lifetime.
 import { Effect, Layer } from "effect";
 import { PgBoss, Worker } from "pgboss-effect";
 
-import { Emails } from "./emails";
+import { EmailsQueue } from "./emails";
 
-const EmailWorker = Worker.make(Emails, { pollingIntervalSeconds: 1 }, (job) =>
-  Effect.gen(function* () {
-    yield* Effect.log(`sending ${job.data.subject} to ${job.data.to}`);
-  }),
+const EmailWorker = Worker.make(
+  EmailsQueue,
+  { pollingIntervalSeconds: 1 },
+  (job) =>
+    Effect.gen(function* () {
+      yield* Effect.log(`sending ${job.data.subject} to ${job.data.to}`);
+    }),
 );
 
 const PgBossLive = PgBoss.layer({
@@ -81,11 +84,11 @@ const PgBossLive = PgBoss.layer({
 });
 
 const WorkerLive = EmailWorker.toLayer.pipe(
-  Layer.provide(Emails.toLayer),
+  Layer.provide(EmailsQueue.toLayer),
   Layer.provideMerge(PgBossLive),
 );
 
-await Effect.runPromise(Effect.scoped(Layer.launch(WorkerLive)));
+Effect.runFork(Layer.launch(WorkerLive));
 ```
 
 ## Events and errors
@@ -106,6 +109,9 @@ const logErrors = Effect.gen(function* () {
 });
 ```
 
+`forkScoped` ties the stream to the current `Scope`, so run this inside a scoped
+layer or `Effect.scoped`.
+
 - `PgBoss.errors` and `PgBoss.warnings` are stream shortcuts.
 - `PgBoss.events` has streams for `error`, `warning`, `wip`, `stopped`, `bam`,
   and `flow`.
@@ -113,7 +119,7 @@ const logErrors = Effect.gen(function* () {
 
 ## API
 
-- `PgBoss.layer(options)` — scoped pg-boss layer
+- `PgBoss.layer(options)` — pg-boss instance layer
 - `Queue.make(name, { payload, queueOptions })`
 - `queue.send(data, options?)`
 - `queue.toLayer` — creates the queue
