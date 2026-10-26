@@ -1,0 +1,79 @@
+{
+  "name": "pgboss-effect",
+  "version": "0.1.0",
+  "description": "Opinionated way of doing pg-boss queues and workers in Effect applications.",
+  "license": "MIT",
+  "author": "Erik Putar",
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "packageManager": "pnpm@11.1.2",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/erikputar/pg-boss-effect.git"
+  },
+  "homepage": "https://github.com/erikputar/pg-boss-effect#readme",
+  "bugs": {
+    "url": "https://github.com/erikputar/pg-boss-effect/issues"
+  },
+  "keywords": [
+    "pg-boss",
+    "effect",
+    "effect-ts",
+    "typescript",
+    "postgres",
+    "queue",
+    "worker",
+    "job-queue"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "build": "tsdown",
+    "lint": "oxlint --type-check --type-aware",
+    "format": "biome check .",
+    "format:fix": "biome check --write .",
+    "check": "pnpm run lint && pnpm run format && pnpm run build && pnpm run test:types && publint && attw --pack .",
+    "test": "vitest run",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "vitest run --project integration",
+    "test:types": "tsc --noEmit -p tsconfig.consumer.json",
+    "changeset": "changeset",
+    "version": "changeset version",
+    "release": "changeset publish"
+  },
+  "peerDependencies": {
+    "effect": "^4.0.0",
+    "pg-boss": "^12.28.0"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.5",
+    "@biomejs/biome": "^2.6.3",
+    "@changesets/cli": "^3.0.3",
+    "@effect/language-service": "^0.87.5",
+    "@effect/vitest": "^4.0.6",
+    "@types/node": "^24.10.9",
+    "effect": "^4.0.6",
+    "oxlint": "^1.89.0",
+    "oxlint-tsgolint": "^7.0.2005",
+    "pg-boss": "^12.38.0",
+    "publint": "^0.3.25",
+    "tsdown": "^0.23.2",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.5"
+  }
+}

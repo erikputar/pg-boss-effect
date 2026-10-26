@@ -1,0 +1,23 @@
+{
+  "plugins": ["eslint", "typescript", "unicorn", "import", "oxc", "promise"],
+  "categories": {
+    "correctness": "error",
+    "perf": "error",
+    "pedantic": "off",
+    "style": "off",
+    "restriction": "off",
+    "suspicious": "off",
+    "nursery": "off"
+  },
+  "options": {
+    "typeAware": true
+  },
+  "env": {
+    "builtin": true,
+    "node": true
+  },
+  "rules": {
+    "eslint/eqeqeq": ["error", "always", { "null": "ignore" }],
+    "typescript/no-floating-promises": "off"
+  }
+}
