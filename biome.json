@@ -9,7 +9,7 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**", "!pnpm-lock.yaml", "!dist/**"]
+    "includes": ["**", "!pnpm-lock.yaml", "!dist/**", "!.changeset/**"]
   },
   "assist": {
     "actions": {
