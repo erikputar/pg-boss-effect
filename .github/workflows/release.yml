@@ -36,8 +36,8 @@ jobs:
       - run: pnpm test:integration
       - uses: changesets/action@v2
         with:
-          publish-script: pnpm release
-          version-script: pnpm version
+          publish-script: pnpm run release
+          version-script: pnpm run version
           commit-message: "chore: release"
           pr-title: "chore: release"
           create-github-releases: true
