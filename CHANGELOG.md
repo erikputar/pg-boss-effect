@@ -1,5 +1,14 @@
 # pgboss-effect
 
+## 0.2.0
+
+### Minor Changes
+
+- 8d1cab5: Add typed dead-letter, schedule, startup/config, and transaction database errors, and stop workers when their layer scope closes.
+- 8d1cab5: Add transactional workers with a `PgBossTransaction` passed to the handler, support `includeMetadata` workers, and re-export pg-boss public types unchanged. Worker options no longer accept unsupported settings silently. The pg-boss peer requirement is now ^12.32.0 for transactional workers.
+- 8d1cab5: Allow `PgBoss.layer` to accept a connection string directly and add `PgBoss.getInstances` for cross-process worker and instance health.
+- 8d1cab5: Add declarative queue schedules, schedule reads/removal on queues, and `PgBoss.previewSchedule`.
+
 ## 0.1.2
 
 ### Patch Changes
