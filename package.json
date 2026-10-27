@@ -1,6 +1,6 @@
 {
   "name": "pgboss-effect",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Simple and type-safe pg-boss queues and workers in Effect.",
   "license": "MIT",
   "author": "Erik Putar",
