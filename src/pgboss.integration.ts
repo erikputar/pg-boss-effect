@@ -95,6 +95,47 @@ layer(TestLayer, { excludeTestServices: true })("pgboss-effect", (it) => {
     }),
   );
 
+  it.effect("registers and manages queue schedules", () =>
+    Effect.gen(function* () {
+      const scheduledQueue = Queue.make(`scheduled-${randomUUID()}`, {
+        payload: TxPayload,
+        schedules: {
+          daily: {
+            cron: "0 0 * * *",
+            data: { label: "daily" },
+            options: { tz: "UTC" },
+          },
+        },
+      });
+
+      yield* Effect.scoped(Effect.provide(Effect.void, scheduledQueue.toLayer));
+
+      const jobId = yield* scheduledQueue.send({ label: "direct" });
+      expect(jobId).not.toBeNull();
+
+      const schedules = yield* scheduledQueue.getSchedules();
+      expect(schedules).toHaveLength(1);
+      expect(schedules[0]?.key).toBe("daily");
+      expect(schedules[0]?.data).toEqual({ label: "daily" });
+
+      const daily = yield* scheduledQueue.getSchedule("daily");
+      expect(daily?.cron).toBe("0 0 * * *");
+
+      yield* scheduledQueue.unschedule("daily");
+      expect(yield* scheduledQueue.getSchedules()).toHaveLength(0);
+    }),
+  );
+
+  it.effect("previews schedules", () =>
+    Effect.gen(function* () {
+      const { previewSchedule } = yield* PgBoss;
+      const occurrences = yield* previewSchedule("0 0 * * *", { count: 2 });
+
+      expect(occurrences).toHaveLength(2);
+      expect(occurrences.every((date) => date instanceof Date)).toBe(true);
+    }),
+  );
+
   it.effect("maps a missing queue to QueueNotFoundError", () =>
     Effect.gen(function* () {
       const missingQueue = Queue.make(`missing-${randomUUID()}`, {

@@ -4,8 +4,11 @@ import {
   type Db,
   type PgBossEventMap,
   type Job as PgBossJob,
+  type PreviewScheduleOptions,
   type Queue,
   type QueueResult,
+  type Schedule,
+  type ScheduleOptions,
   type SendOptions,
   type Warning,
   type WorkOptions,
@@ -24,7 +27,9 @@ export class QueueNotFoundError extends Data.TaggedError("QueueNotFoundError")<{
 }> {}
 
 const isQueueNotFound = (cause: unknown, queue: string): cause is Error =>
-  cause instanceof Error && cause.message === `Queue ${queue} does not exist`;
+  cause instanceof Error &&
+  (cause.message === `Queue ${queue} does not exist` ||
+    cause.message === `Queue ${queue} not found`);
 
 export type PgBossOptions = ConstructorOptions;
 
@@ -55,6 +60,11 @@ export interface PgBossService {
   readonly errors: Stream.Stream<Error>;
 
   readonly warnings: Stream.Stream<Warning>;
+
+  readonly previewSchedule: (
+    expression: string,
+    options?: PreviewScheduleOptions,
+  ) => Effect.Effect<ReadonlyArray<Date>, PgBossError>;
 }
 
 export interface PgBossInternalService {
@@ -77,6 +87,28 @@ export interface PgBossInternalService {
     ) => Effect.Effect<A, E, R>,
     options?: WorkOptions,
   ) => Effect.Effect<string, PgBossError, R>;
+
+  readonly schedule: (
+    name: string,
+    cron: string,
+    data?: object | null,
+    options?: ScheduleOptions,
+  ) => Effect.Effect<void, PgBossError | QueueNotFoundError>;
+
+  readonly unschedule: (
+    name: string,
+    key?: string,
+  ) => Effect.Effect<void, PgBossError>;
+
+  readonly getSchedules: (
+    name?: string,
+    key?: string,
+  ) => Effect.Effect<Schedule[], PgBossError>;
+
+  readonly getSchedule: (
+    name: string,
+    key?: string,
+  ) => Effect.Effect<Schedule | null, PgBossError>;
 }
 
 export class PgBossInternal extends Context.Service<
@@ -206,6 +238,47 @@ export const makeRuntime = (
         catch: (cause) => new PgBossError({ cause }),
       });
 
+    const schedule = (
+      name: string,
+      cron: string,
+      data?: object | null,
+      scheduleOptions?: ScheduleOptions,
+    ) =>
+      Effect.tryPromise({
+        try: () => pgBoss.schedule(name, cron, data, scheduleOptions),
+        catch: (cause) =>
+          isQueueNotFound(cause, name)
+            ? new QueueNotFoundError({ queue: name, cause })
+            : new PgBossError({ cause }),
+      });
+
+    const unschedule = (name: string, key?: string) =>
+      Effect.tryPromise({
+        try: () => pgBoss.unschedule(name, key),
+        catch: (cause) => new PgBossError({ cause }),
+      });
+
+    const getSchedules = (name?: string, key?: string) =>
+      Effect.tryPromise({
+        try: () => pgBoss.getSchedules(name, key),
+        catch: (cause) => new PgBossError({ cause }),
+      });
+
+    const getSchedule = (name: string, key?: string) =>
+      Effect.tryPromise({
+        try: () => pgBoss.getSchedule(name, key),
+        catch: (cause) => new PgBossError({ cause }),
+      });
+
+    const previewSchedule = (
+      expression: string,
+      previewOptions?: PreviewScheduleOptions,
+    ) =>
+      Effect.try({
+        try: () => pgBoss.previewSchedule(expression, previewOptions),
+        catch: (cause) => new PgBossError({ cause }),
+      });
+
     const makeTransaction = (db: Db): PgBossTransaction => ({
       db,
       executeSql: (text, values) =>
@@ -252,6 +325,10 @@ export const makeRuntime = (
       createQueue,
       send,
       work,
+      schedule,
+      unschedule,
+      getSchedules,
+      getSchedule,
     };
 
     const publicService: PgBossService = {
@@ -260,6 +337,7 @@ export const makeRuntime = (
       events,
       errors: events.error,
       warnings: events.warning,
+      previewSchedule,
     };
 
     return { internal, public: publicService };

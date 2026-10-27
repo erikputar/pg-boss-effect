@@ -42,6 +42,10 @@ const PgBossFake = Layer.effect(
           state.createQueueCalls.push([name, options]);
         }),
       send: () => Effect.succeed("job-id"),
+      schedule: () => Effect.void,
+      unschedule: () => Effect.void,
+      getSchedules: () => Effect.succeed([]),
+      getSchedule: () => Effect.succeed(null),
       work: <A, E, R>(
         name: string,
         handler: (

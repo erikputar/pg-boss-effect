@@ -150,6 +150,55 @@ transaction on (the built-in pool supports this). It cannot be combined with
 Each in-flight handler holds a pool connection, so size the pool accordingly.
 Use `transactionTimeoutSeconds` to bound the database-side transaction.
 
+## Scheduling
+
+Schedules are declared on the queue and registered by `queue.toLayer`. A queue
+can have multiple schedules, distinguished by their record keys:
+
+```ts
+const DailyReport = Queue.make("daily-report", {
+  payload: ReportPayload,
+  schedules: {
+    weekday: {
+      cron: "0 9 * * 1-5",
+      data: { report: "weekday" },
+      options: { tz: "Europe/Tallinn" },
+    },
+    weekend: {
+      cron: "0 10 * * 0,6",
+      data: { report: "weekend" },
+    },
+  },
+});
+```
+
+`cron` accepts a cron expression or an RFC 5545 recurrence rule. Schedule data
+is encoded with the queue's payload schema when the layer is built.
+
+A scheduled queue is still a normal queue, so `queue.send` and workers work as
+usual. Use `getSchedules`, `getSchedule`, and `unschedule` to inspect or remove
+schedules:
+
+```ts
+const schedules = yield* DailyReport.getSchedules();
+const weekday = yield* DailyReport.getSchedule("weekday");
+
+yield* DailyReport.unschedule("weekday");
+```
+
+These return raw pg-boss `Schedule` rows. Decode `schedule.data` with
+`DailyReport.payloadSchema` if needed.
+
+Removing a schedule from the configuration does not delete the existing row; it
+continues firing until `unschedule` is called.
+
+`PgBoss.previewSchedule` previews an expression without touching the database:
+
+```ts
+const pgBoss = yield* PgBoss;
+const nextRuns = yield* pgBoss.previewSchedule("0 9 * * 1-5", { count: 5 });
+```
+
 ## Events and errors
 
 `PgBoss` exposes queue reads and event streams:
@@ -179,11 +228,13 @@ layer or `Effect.scoped`.
 ## API
 
 - `PgBoss.layer(options)` — pg-boss instance layer
-- `Queue.make(name, { payload, queueOptions })`
+- `Queue.make(name, { payload, queueOptions, schedules })`
 - `queue.send(data, options?)`
-- `queue.toLayer` — creates the queue
+- `queue.toLayer` — creates the queue and registers its schedules
+- `queue.getSchedules()`, `queue.getSchedule(key?)`, `queue.unschedule(key?)`
 - `Worker.make(queue, options?, handler)`
 - `worker.toLayer` — registers the worker
+- `PgBoss.previewSchedule(expression, options?)`
 - `PgBossTransaction` — transaction handle passed to transactional workers
 
 pg-boss public types such as `Job`, `JobWithMetadata`, `SendOptions`,

@@ -3,9 +3,10 @@ import type {
   Db,
   Job,
   JobWithMetadata,
-  PgBossError,
   PgBossTransaction,
+  QueueError,
   QueueResult,
+  QueueSchedule,
   SendOptions,
   WorkOptions,
 } from "pgboss-effect";
@@ -14,6 +15,17 @@ import { PgBoss, Queue, Worker } from "pgboss-effect";
 const Payload = Schema.Struct({ message: Schema.String });
 
 const queue = Queue.make("consumer-queue", { payload: Payload });
+
+const scheduledQueue = Queue.make("scheduled-consumer-queue", {
+  payload: Payload,
+  schedules: {
+    daily: {
+      cron: "0 0 * * *",
+      data: { message: "scheduled" },
+      options: { tz: "UTC" },
+    },
+  },
+});
 
 const worker = Worker.make(queue, (job) =>
   Effect.log(`processing ${job.data.message}`),
@@ -59,6 +71,17 @@ const batchTransactionalWorker = Worker.make(
     }),
 );
 
+const invalidScheduledQueue = Queue.make("invalid-scheduled-queue", {
+  payload: Payload,
+  schedules: {
+    daily: {
+      cron: "0 0 * * *",
+      // @ts-expect-error schedule data must match the queue payload
+      data: { wrong: true },
+    },
+  },
+});
+
 const invalidMetadataWorker = Worker.make(queue, (job) =>
   // @ts-expect-error metadata fields require includeMetadata: true
   Effect.sync(() => job.state),
@@ -82,6 +105,7 @@ const typedSendOptions: SendOptions | undefined = undefined;
 const typedWorkOptions: WorkOptions | undefined = undefined;
 const typedDb: Db | undefined = undefined;
 const typedTransaction: PgBossTransaction | undefined = undefined;
+const typedSchedule: QueueSchedule<{ message: string }> | undefined = undefined;
 
 const PgBossLive = PgBoss.layer({
   connectionString: "postgresql://pgboss:pgboss@localhost:5435/pgboss",
@@ -94,13 +118,24 @@ const WorkerLive = worker.toLayer.pipe(
   Layer.provideMerge(PgBossLive),
 );
 
-const TransactionalWorkerLive: Layer.Layer<never, PgBossError, never> =
+const TransactionalWorkerLive: Layer.Layer<never, QueueError, never> =
   transactionalWorker.toLayer.pipe(
     Layer.provide(queue.toLayer),
     Layer.provideMerge(PgBossLive),
   );
 
 const send = queue.send({ message: "hello" }).pipe(Effect.provide(QueueLive));
+
+const scheduleProgram = Effect.all([
+  scheduledQueue.getSchedules(),
+  scheduledQueue.getSchedule("daily"),
+  scheduledQueue.unschedule("daily"),
+]);
+
+const previewSchedules = Effect.gen(function* () {
+  const pgBoss = yield* PgBoss;
+  return yield* pgBoss.previewSchedule("0 0 * * *", { count: 2 });
+});
 
 const workerProgram = Layer.launch(WorkerLive);
 const transactionalWorkerProgram = Layer.launch(TransactionalWorkerLive);
@@ -110,8 +145,12 @@ export {
   batchTransactionalWorker,
   invalidMetadataWorker,
   invalidPerJobResults,
+  invalidScheduledQueue,
   invalidTransactionTimeout,
   metadataWorker,
+  previewSchedules,
+  scheduleProgram,
+  scheduledQueue,
   send,
   transactionalMetadataWorker,
   transactionalWorker,
@@ -120,6 +159,7 @@ export {
   typedJob,
   typedJobWithMetadata,
   typedQueueResult,
+  typedSchedule,
   typedSendOptions,
   typedTransaction,
   typedWorkOptions,
