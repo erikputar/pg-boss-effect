@@ -1,7 +1,24 @@
 import { Deferred, Effect, Stream } from "effect";
-import type { Job as PgBossJob, QueueResult, WorkOptions } from "pg-boss";
+import type {
+  Db,
+  Instance,
+  Job as PgBossJob,
+  PreviewScheduleOptions,
+  QueueResult,
+  Schedule,
+  ScheduleOptions,
+  WorkOptions,
+} from "pg-boss";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import {
+  DeadLetterQueueNotFoundError,
+  InvalidScheduleError,
+  PgBossConfigError,
+  PgBossDatabaseError,
+  PgBossMigrationsRequiredError,
+  PgBossNotInstalledError,
+} from "./errors";
 import {
   PgBoss,
   PgBossError,
@@ -10,13 +27,16 @@ import {
 } from "./pgBoss";
 import { PgBossInternal } from "./pgBossInternal";
 
-type WorkHandler = (jobs: PgBossJob[]) => Promise<unknown>;
+type WorkHandler = (jobs: PgBossJob[], db?: Db) => Promise<unknown>;
 type Listener = (...args: unknown[]) => void;
 
 const { fakePgBoss, PgBossMock } = vi.hoisted(() => {
   class PgBossMock {
-    constructor(options: PgBossOptions) {
+    constructor(options: PgBossOptions | string) {
       fakePgBoss.constructorOptions = options;
+      if (fakePgBoss.constructorError !== undefined) {
+        throw fakePgBoss.constructorError;
+      }
     }
 
     on(event: string, listener: Listener) {
@@ -35,6 +55,9 @@ const { fakePgBoss, PgBossMock } = vi.hoisted(() => {
 
     start() {
       fakePgBoss.startCalls += 1;
+      if (fakePgBoss.startError !== undefined) {
+        return Promise.reject(fakePgBoss.startError);
+      }
       return Promise.resolve(this);
     }
 
@@ -76,7 +99,7 @@ const { fakePgBoss, PgBossMock } = vi.hoisted(() => {
           : maybeHandler;
       const options =
         typeof handlerOrOptions === "function" ? undefined : handlerOrOptions;
-      if (handler === undefined) {
+      if (!handler) {
         return Promise.reject(new Error("missing work handler"));
       }
       fakePgBoss.workCalls.push([name, options]);
@@ -99,14 +122,77 @@ const { fakePgBoss, PgBossMock } = vi.hoisted(() => {
       }
       return Promise.resolve(fakePgBoss.getQueueResult);
     }
+
+    schedule(
+      name: string,
+      cron: string,
+      data?: unknown,
+      options?: ScheduleOptions,
+    ) {
+      fakePgBoss.scheduleCalls.push([name, cron, data, options]);
+      if (fakePgBoss.scheduleError !== undefined) {
+        return Promise.reject(fakePgBoss.scheduleError);
+      }
+      return Promise.resolve();
+    }
+
+    unschedule(name: string, key?: string) {
+      fakePgBoss.unscheduleCalls.push([name, key]);
+      if (fakePgBoss.unscheduleError !== undefined) {
+        return Promise.reject(fakePgBoss.unscheduleError);
+      }
+      return Promise.resolve();
+    }
+
+    getSchedules(name?: string, key?: string) {
+      fakePgBoss.getSchedulesCalls.push([name, key]);
+      if (fakePgBoss.getSchedulesError !== undefined) {
+        return Promise.reject(fakePgBoss.getSchedulesError);
+      }
+      return Promise.resolve(fakePgBoss.getSchedulesResult);
+    }
+
+    getSchedule(name: string, key?: string) {
+      fakePgBoss.getScheduleCalls.push([name, key]);
+      if (fakePgBoss.getScheduleError !== undefined) {
+        return Promise.reject(fakePgBoss.getScheduleError);
+      }
+      return Promise.resolve(fakePgBoss.getScheduleResult);
+    }
+
+    previewSchedule(expression: string, options?: PreviewScheduleOptions) {
+      fakePgBoss.previewScheduleCalls.push([expression, options]);
+      if (fakePgBoss.previewScheduleError !== undefined) {
+        throw fakePgBoss.previewScheduleError;
+      }
+      return fakePgBoss.previewScheduleResult;
+    }
+
+    offWork(name: string, options?: unknown) {
+      fakePgBoss.offWorkCalls.push([name, options]);
+      if (fakePgBoss.offWorkError !== undefined) {
+        return Promise.reject(fakePgBoss.offWorkError);
+      }
+      return Promise.resolve();
+    }
+
+    getInstances() {
+      fakePgBoss.getInstancesCalls += 1;
+      if (fakePgBoss.getInstancesError !== undefined) {
+        return Promise.reject(fakePgBoss.getInstancesError);
+      }
+      return Promise.resolve(fakePgBoss.getInstancesResult);
+    }
   }
 
   const fakePgBoss = {
     listeners: new Map<string, Set<Listener>>(),
-    constructorOptions: undefined as PgBossOptions | undefined,
+    constructorOptions: undefined as PgBossOptions | string | undefined,
+    constructorError: undefined as unknown,
     onCalls: [] as Array<[string, Listener]>,
     offCalls: [] as Array<[string, Listener]>,
     startCalls: 0,
+    startError: undefined as unknown,
     stopCalls: 0,
     createQueueCalls: [] as Array<[string, unknown?]>,
     createQueueError: undefined as unknown,
@@ -120,6 +206,26 @@ const { fakePgBoss, PgBossMock } = vi.hoisted(() => {
     getQueueCalls: [] as Array<[string]>,
     getQueueError: undefined as unknown,
     getQueueResult: null as QueueResult | null,
+    scheduleCalls: [] as Array<[string, string, unknown?, ScheduleOptions?]>,
+    scheduleError: undefined as unknown,
+    unscheduleCalls: [] as Array<[string, string | undefined]>,
+    unscheduleError: undefined as unknown,
+    getSchedulesCalls: [] as Array<[string | undefined, string | undefined]>,
+    getSchedulesError: undefined as unknown,
+    getSchedulesResult: [] as Schedule[],
+    getScheduleCalls: [] as Array<[string, string | undefined]>,
+    getScheduleError: undefined as unknown,
+    getScheduleResult: null as Schedule | null,
+    previewScheduleCalls: [] as Array<
+      [string, PreviewScheduleOptions | undefined]
+    >,
+    previewScheduleError: undefined as unknown,
+    previewScheduleResult: [] as Date[],
+    offWorkCalls: [] as Array<[string, unknown?]>,
+    offWorkError: undefined as unknown,
+    getInstancesCalls: 0,
+    getInstancesError: undefined as unknown,
+    getInstancesResult: [] as Instance[],
 
     emit(event: string, ...args: unknown[]) {
       for (const listener of this.listeners.get(event) ?? []) {
@@ -130,9 +236,11 @@ const { fakePgBoss, PgBossMock } = vi.hoisted(() => {
     reset() {
       this.listeners = new Map();
       this.constructorOptions = undefined;
+      this.constructorError = undefined;
       this.onCalls = [];
       this.offCalls = [];
       this.startCalls = 0;
+      this.startError = undefined;
       this.stopCalls = 0;
       this.createQueueCalls = [];
       this.createQueueError = undefined;
@@ -146,6 +254,24 @@ const { fakePgBoss, PgBossMock } = vi.hoisted(() => {
       this.getQueueCalls = [];
       this.getQueueError = undefined;
       this.getQueueResult = null;
+      this.scheduleCalls = [];
+      this.scheduleError = undefined;
+      this.unscheduleCalls = [];
+      this.unscheduleError = undefined;
+      this.getSchedulesCalls = [];
+      this.getSchedulesError = undefined;
+      this.getSchedulesResult = [];
+      this.getScheduleCalls = [];
+      this.getScheduleError = undefined;
+      this.getScheduleResult = null;
+      this.previewScheduleCalls = [];
+      this.previewScheduleError = undefined;
+      this.previewScheduleResult = [];
+      this.offWorkCalls = [];
+      this.offWorkError = undefined;
+      this.getInstancesCalls = 0;
+      this.getInstancesError = undefined;
+      this.getInstancesResult = [];
     },
   };
 
@@ -168,19 +294,26 @@ const connectionStringOptions: PgBossOptions = {
 
 const runWithPgBoss = <A, E>(
   effect: Effect.Effect<A, E, PgBoss | PgBossInternal>,
-  options: PgBossOptions = objectOptions,
+  options: PgBossOptions | string = objectOptions,
 ) =>
   Effect.runPromise(
     Effect.scoped(effect.pipe(Effect.provide(PgBoss.layer(options)))),
   );
 
-const invokeWork = (jobs: PgBossJob[]) =>
+const runWithPgBossError = (options: PgBossOptions | string = objectOptions) =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.flip(Effect.provide(Effect.void, PgBoss.layer(options))),
+    ),
+  );
+
+const invokeWork = (jobs: PgBossJob[], db?: Db) =>
   Effect.gen(function* () {
     const handler = fakePgBoss.workHandler;
-    if (handler === undefined) {
+    if (!handler) {
       return yield* Effect.die(new Error("missing work handler"));
     }
-    return yield* Effect.promise(() => handler(jobs));
+    return yield* Effect.promise(() => handler(jobs, db));
   });
 
 const fakeJob: PgBossJob = {
@@ -209,6 +342,14 @@ describe("PgBoss", () => {
     await runWithPgBoss(Effect.void, connectionStringOptions);
 
     expect(fakePgBoss.constructorOptions).toEqual(connectionStringOptions);
+  });
+
+  it("accepts a connection string directly", async () => {
+    const connectionString = "postgresql://user:pass@localhost:5432/direct";
+
+    await runWithPgBoss(Effect.void, connectionString);
+
+    expect(fakePgBoss.constructorOptions).toBe(connectionString);
   });
 
   it("registers every event listener", async () => {
@@ -363,6 +504,67 @@ describe("PgBoss", () => {
     );
 
     expect(result).toEqual([{ hello: "world" }, { hello: "again" }]);
+  });
+
+  it("work provides a transaction to transactional workers", async () => {
+    const executeSql = vi.fn().mockResolvedValue({ rows: [{ answer: 42 }] });
+    const db: Db = { executeSql };
+
+    const result = await runWithPgBoss(
+      Effect.gen(function* () {
+        const { work } = yield* PgBossInternal;
+        yield* work(
+          "test-queue",
+          (_jobs, transaction) => {
+            if (!transaction) {
+              return Effect.die(new Error("missing transaction"));
+            }
+            return transaction.executeSql("SELECT 42");
+          },
+          { transactional: true },
+        );
+
+        return yield* invokeWork([fakeJob], db);
+      }),
+    );
+
+    expect(result).toEqual([{ answer: 42 }]);
+    expect(executeSql).toHaveBeenCalledWith("SELECT 42", undefined);
+  });
+
+  it("maps transaction SQL failures to PgBossDatabaseError", async () => {
+    const cause = Object.assign(new Error("duplicate"), {
+      code: "23505",
+      constraint: "job_pkey",
+      detail: "Key (id)=(1) already exists.",
+    });
+    const db: Db = {
+      executeSql: () => Promise.reject(cause),
+    };
+
+    const result = await runWithPgBoss(
+      Effect.gen(function* () {
+        const { work } = yield* PgBossInternal;
+        yield* work(
+          "test-queue",
+          (_jobs, transaction) =>
+            transaction
+              ? transaction.executeSql("SELECT 1").pipe(Effect.flip)
+              : Effect.die(new Error("missing transaction")),
+          { transactional: true },
+        );
+
+        return yield* invokeWork([fakeJob], db);
+      }),
+    );
+
+    expect(result).toBeInstanceOf(PgBossDatabaseError);
+    if (result instanceof PgBossDatabaseError) {
+      expect(result.cause).toBe(cause);
+      expect(result.code).toBe("23505");
+      expect(result.constraint).toBe("job_pkey");
+      expect(result.detail).toBe("Key (id)=(1) already exists.");
+    }
   });
 
   it("work fails the job when the handler effect fails", async () => {
@@ -527,6 +729,33 @@ describe("PgBoss", () => {
     expect(queue).toBeNull();
   });
 
+  it("getInstances returns registered instances", async () => {
+    const instances = await runWithPgBoss(
+      Effect.gen(function* () {
+        const { getInstances } = yield* PgBoss;
+        return yield* getInstances();
+      }),
+    );
+
+    expect(instances).toEqual([]);
+    expect(fakePgBoss.getInstancesCalls).toBe(1);
+  });
+
+  it("getInstances maps failures to PgBossError", async () => {
+    fakePgBoss.getInstancesError = new Error("boom");
+
+    const error = await runWithPgBoss(
+      Effect.flip(
+        Effect.gen(function* () {
+          const { getInstances } = yield* PgBoss;
+          yield* getInstances();
+        }),
+      ),
+    );
+
+    expect(error).toBeInstanceOf(PgBossError);
+  });
+
   it("getQueues maps failures to PgBossError", async () => {
     fakePgBoss.getQueuesError = new Error("boom");
 
@@ -555,5 +784,199 @@ describe("PgBoss", () => {
     );
 
     expect(error).toBeInstanceOf(PgBossError);
+  });
+
+  it("schedule calls through to pg-boss", async () => {
+    await runWithPgBoss(
+      Effect.gen(function* () {
+        const { schedule } = yield* PgBossInternal;
+        yield* schedule(
+          "test-queue",
+          "0 0 * * *",
+          { hello: "world" },
+          {
+            key: "daily",
+          },
+        );
+      }),
+    );
+
+    expect(fakePgBoss.scheduleCalls).toEqual([
+      ["test-queue", "0 0 * * *", { hello: "world" }, { key: "daily" }],
+    ]);
+  });
+
+  it("maps a missing schedule queue to QueueNotFoundError", async () => {
+    fakePgBoss.scheduleError = new Error("Queue test-queue not found");
+
+    const error = await runWithPgBoss(
+      Effect.flip(
+        Effect.gen(function* () {
+          const { schedule } = yield* PgBossInternal;
+          yield* schedule("test-queue", "0 0 * * *");
+        }),
+      ),
+    );
+
+    expect(error).toBeInstanceOf(QueueNotFoundError);
+  });
+
+  it("passes schedule reads and unschedule through to pg-boss", async () => {
+    await runWithPgBoss(
+      Effect.gen(function* () {
+        const { getSchedule, getSchedules, unschedule } = yield* PgBossInternal;
+        yield* unschedule("test-queue", "daily");
+        yield* getSchedules("test-queue");
+        yield* getSchedule("test-queue", "daily");
+      }),
+    );
+
+    expect(fakePgBoss.unscheduleCalls).toEqual([["test-queue", "daily"]]);
+    expect(fakePgBoss.getSchedulesCalls).toEqual([["test-queue", undefined]]);
+    expect(fakePgBoss.getScheduleCalls).toEqual([["test-queue", "daily"]]);
+  });
+
+  it("previewSchedule returns occurrences", async () => {
+    const occurrences = [
+      new Date("2024-01-01T00:00:00.000Z"),
+      new Date("2024-01-02T00:00:00.000Z"),
+    ];
+    fakePgBoss.previewScheduleResult = occurrences;
+
+    const dates = await runWithPgBoss(
+      Effect.gen(function* () {
+        const { previewSchedule } = yield* PgBoss;
+        return yield* previewSchedule("0 0 * * *", { count: 2 });
+      }),
+    );
+
+    expect(dates).toEqual(occurrences);
+    expect(fakePgBoss.previewScheduleCalls).toEqual([
+      ["0 0 * * *", { count: 2 }],
+    ]);
+  });
+
+  it("previewSchedule maps failures to InvalidScheduleError", async () => {
+    fakePgBoss.previewScheduleError = new Error("invalid cron");
+
+    const error = await runWithPgBoss(
+      Effect.flip(
+        Effect.gen(function* () {
+          const { previewSchedule } = yield* PgBoss;
+          yield* previewSchedule("nope");
+        }),
+      ),
+    );
+
+    expect(error).toBeInstanceOf(InvalidScheduleError);
+  });
+
+  it("maps constructor failures to PgBossConfigError", async () => {
+    fakePgBoss.constructorError = new Error("bad config");
+
+    const error = await runWithPgBossError();
+
+    expect(error).toBeInstanceOf(PgBossConfigError);
+  });
+
+  it("maps not-installed startup failures", async () => {
+    fakePgBoss.startError = new Error("pg-boss is not installed");
+
+    const error = await runWithPgBossError();
+
+    expect(error).toBeInstanceOf(PgBossNotInstalledError);
+  });
+
+  it("maps migration startup failures", async () => {
+    fakePgBoss.startError = new Error("pg-boss database requires migrations");
+
+    const error = await runWithPgBossError();
+
+    expect(error).toBeInstanceOf(PgBossMigrationsRequiredError);
+  });
+
+  it("maps a missing dead letter queue during queue creation", async () => {
+    fakePgBoss.createQueueError = new Error("Queue missing-dlq does not exist");
+
+    const error = await runWithPgBoss(
+      Effect.flip(
+        Effect.gen(function* () {
+          const { createQueue } = yield* PgBossInternal;
+          yield* createQueue("source", { deadLetter: "missing-dlq" });
+        }),
+      ),
+    );
+
+    expect(error).toBeInstanceOf(DeadLetterQueueNotFoundError);
+    if (error instanceof DeadLetterQueueNotFoundError) {
+      expect(error.queue).toBe("source");
+      expect(error.deadLetterQueue).toBe("missing-dlq");
+    }
+  });
+
+  it("maps a missing dead letter queue during send", async () => {
+    fakePgBoss.sendError = new Error(
+      "Dead letter queue missing-dlq does not exist",
+    );
+
+    const error = await runWithPgBoss(
+      Effect.flip(
+        Effect.gen(function* () {
+          const { send } = yield* PgBossInternal;
+          yield* send("source", { hello: "world" });
+        }),
+      ),
+    );
+
+    expect(error).toBeInstanceOf(DeadLetterQueueNotFoundError);
+    if (error instanceof DeadLetterQueueNotFoundError) {
+      expect(error.queue).toBe("source");
+      expect(error.deadLetterQueue).toBe("missing-dlq");
+    }
+  });
+
+  it("maps invalid schedule errors", async () => {
+    fakePgBoss.scheduleError = new Error("Invalid characters, got value: a");
+
+    const error = await runWithPgBoss(
+      Effect.flip(
+        Effect.gen(function* () {
+          const { schedule } = yield* PgBossInternal;
+          yield* schedule("test-queue", "not a cron");
+        }),
+      ),
+    );
+
+    expect(error).toBeInstanceOf(InvalidScheduleError);
+  });
+
+  it("maps assertion schedule errors", async () => {
+    fakePgBoss.scheduleError = Object.assign(new Error("bad missed"), {
+      code: "ERR_ASSERTION",
+    });
+
+    const error = await runWithPgBoss(
+      Effect.flip(
+        Effect.gen(function* () {
+          const { schedule } = yield* PgBossInternal;
+          yield* schedule("test-queue", "0 0 * * *");
+        }),
+      ),
+    );
+
+    expect(error).toBeInstanceOf(InvalidScheduleError);
+  });
+
+  it("passes offWork through to pg-boss", async () => {
+    await runWithPgBoss(
+      Effect.gen(function* () {
+        const { offWork } = yield* PgBossInternal;
+        yield* offWork("test-queue", { id: "worker-id", wait: false });
+      }),
+    );
+
+    expect(fakePgBoss.offWorkCalls).toEqual([
+      ["test-queue", { id: "worker-id", wait: false }],
+    ]);
   });
 });
