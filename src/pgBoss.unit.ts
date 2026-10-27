@@ -1,5 +1,5 @@
 import { Deferred, Effect, Stream } from "effect";
-import type { Job as PgBossJob, QueueResult, WorkOptions } from "pg-boss";
+import type { Db, Job as PgBossJob, QueueResult, WorkOptions } from "pg-boss";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -10,7 +10,7 @@ import {
 } from "./pgBoss";
 import { PgBossInternal } from "./pgBossInternal";
 
-type WorkHandler = (jobs: PgBossJob[]) => Promise<unknown>;
+type WorkHandler = (jobs: PgBossJob[], db?: Db) => Promise<unknown>;
 type Listener = (...args: unknown[]) => void;
 
 const { fakePgBoss, PgBossMock } = vi.hoisted(() => {
@@ -76,7 +76,7 @@ const { fakePgBoss, PgBossMock } = vi.hoisted(() => {
           : maybeHandler;
       const options =
         typeof handlerOrOptions === "function" ? undefined : handlerOrOptions;
-      if (handler === undefined) {
+      if (!handler) {
         return Promise.reject(new Error("missing work handler"));
       }
       fakePgBoss.workCalls.push([name, options]);
@@ -174,13 +174,13 @@ const runWithPgBoss = <A, E>(
     Effect.scoped(effect.pipe(Effect.provide(PgBoss.layer(options)))),
   );
 
-const invokeWork = (jobs: PgBossJob[]) =>
+const invokeWork = (jobs: PgBossJob[], db?: Db) =>
   Effect.gen(function* () {
     const handler = fakePgBoss.workHandler;
-    if (handler === undefined) {
+    if (!handler) {
       return yield* Effect.die(new Error("missing work handler"));
     }
-    return yield* Effect.promise(() => handler(jobs));
+    return yield* Effect.promise(() => handler(jobs, db));
   });
 
 const fakeJob: PgBossJob = {
@@ -363,6 +363,60 @@ describe("PgBoss", () => {
     );
 
     expect(result).toEqual([{ hello: "world" }, { hello: "again" }]);
+  });
+
+  it("work provides a transaction to transactional workers", async () => {
+    const executeSql = vi.fn().mockResolvedValue({ rows: [{ answer: 42 }] });
+    const db: Db = { executeSql };
+
+    const result = await runWithPgBoss(
+      Effect.gen(function* () {
+        const { work } = yield* PgBossInternal;
+        yield* work(
+          "test-queue",
+          (_jobs, transaction) => {
+            if (!transaction) {
+              return Effect.die(new Error("missing transaction"));
+            }
+            return transaction.executeSql("SELECT 42");
+          },
+          { transactional: true },
+        );
+
+        return yield* invokeWork([fakeJob], db);
+      }),
+    );
+
+    expect(result).toEqual([{ answer: 42 }]);
+    expect(executeSql).toHaveBeenCalledWith("SELECT 42", undefined);
+  });
+
+  it("maps transaction SQL failures to PgBossError", async () => {
+    const cause = new Error("boom");
+    const db: Db = {
+      executeSql: () => Promise.reject(cause),
+    };
+
+    const result = await runWithPgBoss(
+      Effect.gen(function* () {
+        const { work } = yield* PgBossInternal;
+        yield* work(
+          "test-queue",
+          (_jobs, transaction) =>
+            transaction
+              ? transaction.executeSql("SELECT 1").pipe(Effect.flip)
+              : Effect.die(new Error("missing transaction")),
+          { transactional: true },
+        );
+
+        return yield* invokeWork([fakeJob], db);
+      }),
+    );
+
+    expect(result).toBeInstanceOf(PgBossError);
+    if (result instanceof PgBossError) {
+      expect(result.cause).toBe(cause);
+    }
   });
 
   it("work fails the job when the handler effect fails", async () => {

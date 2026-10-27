@@ -1,4 +1,14 @@
 import { Effect, Layer, Schema } from "effect";
+import type {
+  Db,
+  Job,
+  JobWithMetadata,
+  PgBossError,
+  PgBossTransaction,
+  QueueResult,
+  SendOptions,
+  WorkOptions,
+} from "pgboss-effect";
 import { PgBoss, Queue, Worker } from "pgboss-effect";
 
 const Payload = Schema.Struct({ message: Schema.String });
@@ -8,6 +18,70 @@ const queue = Queue.make("consumer-queue", { payload: Payload });
 const worker = Worker.make(queue, (job) =>
   Effect.log(`processing ${job.data.message}`),
 );
+
+const metadataWorker = Worker.make(queue, { includeMetadata: true }, (job) =>
+  Effect.sync(() => job.state),
+);
+
+const batchMetadataWorker = Worker.make(
+  queue,
+  { batchSize: 2, includeMetadata: true },
+  (jobs) => Effect.sync(() => jobs.map((job) => job.priority)),
+);
+
+const transactionalWorker = Worker.make(
+  queue,
+  { transactional: true },
+  (job, transaction) =>
+    Effect.gen(function* () {
+      const rows = yield* transaction.executeSql("SELECT $1", [
+        job.data.message,
+      ]);
+      return rows.length;
+    }),
+);
+
+const transactionalMetadataWorker = Worker.make(
+  queue,
+  { transactional: true, includeMetadata: true },
+  (job, transaction) =>
+    Effect.gen(function* () {
+      yield* transaction.executeSql("SELECT $1", [job.state]);
+    }),
+);
+
+const batchTransactionalWorker = Worker.make(
+  queue,
+  { batchSize: 2, transactional: true },
+  (jobs, transaction) =>
+    Effect.gen(function* () {
+      yield* transaction.executeSql("SELECT $1", [jobs.length]);
+    }),
+);
+
+const invalidMetadataWorker = Worker.make(queue, (job) =>
+  // @ts-expect-error metadata fields require includeMetadata: true
+  Effect.sync(() => job.state),
+);
+
+// @ts-expect-error transactionTimeoutSeconds requires transactional: true
+const invalidTransactionTimeout: SingleWorkerOptions = {
+  transactionTimeoutSeconds: 60,
+};
+
+// @ts-expect-error perJobResults is not supported
+const invalidPerJobResults: BatchWorkerOptions = {
+  batchSize: 2,
+  perJobResults: true,
+};
+
+const typedJob: Job | undefined = undefined;
+const typedJobWithMetadata: JobWithMetadata | undefined = undefined;
+const typedQueueResult: QueueResult | undefined = undefined;
+const typedSendOptions: SendOptions | undefined = undefined;
+const typedWorkOptions: WorkOptions | undefined = undefined;
+const typedDb: Db | undefined = undefined;
+const typedTransaction: PgBossTransaction | undefined = undefined;
 
 const PgBossLive = PgBoss.layer({
   connectionString: "postgresql://pgboss:pgboss@localhost:5435/pgboss",
@@ -20,8 +94,34 @@ const WorkerLive = worker.toLayer.pipe(
   Layer.provideMerge(PgBossLive),
 );
 
+const TransactionalWorkerLive: Layer.Layer<never, PgBossError, never> =
+  transactionalWorker.toLayer.pipe(
+    Layer.provide(queue.toLayer),
+    Layer.provideMerge(PgBossLive),
+  );
+
 const send = queue.send({ message: "hello" }).pipe(Effect.provide(QueueLive));
 
 const workerProgram = Layer.launch(WorkerLive);
+const transactionalWorkerProgram = Layer.launch(TransactionalWorkerLive);
 
-export { send, workerProgram };
+export {
+  batchMetadataWorker,
+  batchTransactionalWorker,
+  invalidMetadataWorker,
+  invalidPerJobResults,
+  invalidTransactionTimeout,
+  metadataWorker,
+  send,
+  transactionalMetadataWorker,
+  transactionalWorker,
+  transactionalWorkerProgram,
+  typedDb,
+  typedJob,
+  typedJobWithMetadata,
+  typedQueueResult,
+  typedSendOptions,
+  typedTransaction,
+  typedWorkOptions,
+  workerProgram,
+};

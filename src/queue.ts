@@ -1,6 +1,7 @@
 import { Data, Effect, Layer, Schema } from "effect";
 import type {
-  Job as PgBossJob,
+  Job,
+  JobWithMetadata,
   Queue as PgBossQueue,
   SendOptions,
 } from "pg-boss";
@@ -23,7 +24,11 @@ export type QueueError =
   | QueueNotFoundError
   | QueuePayloadSchemaError;
 
-export type TypedJob<A> = Omit<PgBossJob, "data"> & { data: A };
+export type TypedJob<A> = Omit<Job, "data"> & { data: A };
+
+export type TypedJobWithMetadata<A> = Omit<JobWithMetadata, "data"> & {
+  data: A;
+};
 
 export interface Queue<
   Name extends string,

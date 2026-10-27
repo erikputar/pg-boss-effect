@@ -57,7 +57,7 @@
   },
   "peerDependencies": {
     "effect": "^4.0.0",
-    "pg-boss": "^12.28.0"
+    "pg-boss": "^12.32.0"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",

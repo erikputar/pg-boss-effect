@@ -1,6 +1,7 @@
 import { Context, Data, Effect, PubSub, type Scope, Stream } from "effect";
 import {
   type ConstructorOptions,
+  type Db,
   type PgBossEventMap,
   type Job as PgBossJob,
   type Queue,
@@ -11,7 +12,7 @@ import {
   PgBoss as _PgBoss,
 } from "pg-boss";
 
-export type { QueueResult } from "pg-boss";
+import type { PgBossTransaction } from "./transaction";
 
 export class PgBossError extends Data.TaggedError("PgBossError")<{
   cause: unknown;
@@ -70,7 +71,10 @@ export interface PgBossInternalService {
 
   readonly work: <A, E, R>(
     queueName: string,
-    handler: (jobs: PgBossJob[]) => Effect.Effect<A, E, R>,
+    handler: (
+      jobs: PgBossJob[],
+      transaction: PgBossTransaction | undefined,
+    ) => Effect.Effect<A, E, R>,
     options?: WorkOptions,
   ) => Effect.Effect<string, PgBossError, R>;
 }
@@ -202,17 +206,31 @@ export const makeRuntime = (
         catch: (cause) => new PgBossError({ cause }),
       });
 
+    const makeTransaction = (db: Db): PgBossTransaction => ({
+      db,
+      executeSql: (text, values) =>
+        Effect.tryPromise({
+          try: () => db.executeSql(text, values ? [...values] : undefined),
+          catch: (cause) => new PgBossError({ cause }),
+        }).pipe(Effect.map((result) => result.rows)),
+    });
+
     const work = <A, E, R>(
       queueName: string,
-      handler: (jobs: PgBossJob[]) => Effect.Effect<A, E, R>,
+      handler: (
+        jobs: PgBossJob[],
+        transaction: PgBossTransaction | undefined,
+      ) => Effect.Effect<A, E, R>,
       workOptions?: WorkOptions,
     ) =>
       Effect.gen(function* () {
         const workContext = yield* Effect.context<R>();
         return yield* Effect.tryPromise({
           try: () => {
-            const cb = (jobs: PgBossJob[]) =>
-              Effect.runPromiseWith(workContext)(handler(jobs));
+            const cb = (jobs: PgBossJob[], db?: Db) =>
+              Effect.runPromiseWith(workContext)(
+                handler(jobs, db ? makeTransaction(db) : undefined),
+              );
             return workOptions
               ? pgBoss.work(queueName, workOptions, cb)
               : pgBoss.work(queueName, cb);

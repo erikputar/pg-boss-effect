@@ -6,7 +6,7 @@ Simple and type-safe pg-boss queues and workers in Effect.
 
 - Node.js >= 22.12
 - Effect 4
-- pg-boss 12
+- pg-boss >= 12.32
 
 ## Install
 
@@ -93,6 +93,63 @@ const WorkerLive = EmailWorker.toLayer.pipe(
 Effect.runFork(Layer.launch(WorkerLive));
 ```
 
+## Job metadata
+
+Pass `includeMetadata: true` to receive pg-boss job metadata in the handler:
+
+```ts
+const EmailWorker = Worker.make(EmailsQueue, { includeMetadata: true }, (job) =>
+  Effect.log(`${job.state} ${job.priority}`),
+);
+```
+
+Handlers get `TypedJobWithMetadata`, which adds fields such as `state`,
+`priority`, `retryLimit`, and `startAfter` to `TypedJob`.
+
+## Transactions
+
+`transactional: true` runs the handler and the job's completion in one
+pg-boss transaction. The handler receives `PgBossTransaction` as its second
+argument:
+
+```ts
+import { Worker } from "pgboss-effect";
+
+const ChargeWorker = Worker.make(
+  ChargesQueue,
+  { transactional: true },
+  (job, tx) =>
+    Effect.gen(function* () {
+      yield* tx.executeSql(
+        "INSERT INTO ledger (customer, amount) VALUES ($1, $2)",
+        [job.data.customer, job.data.amount],
+      );
+
+      yield* ReceiptsQueue.send({ customer: job.data.customer }, { db: tx.db });
+    }),
+);
+```
+
+Batch handlers receive it as `(jobs, tx)`.
+
+`tx.executeSql` returns rows and maps failures to `PgBossError`. `tx.db` is the
+raw pg-boss `Db`, so it can be passed as the `db` option to `queue.send` (and to
+pg-boss APIs you call directly).
+
+The reverse direction also works: pg-boss ORM adapters such as `fromDrizzle`,
+`fromKysely`, `fromKnex`, and `fromPrisma` can be passed to `queue.send` to
+enqueue a job inside your application's own transaction:
+
+```ts
+yield* EmailsQueue.send(data, { db: fromDrizzle(tx, sql) });
+```
+
+A transactional worker needs a database connection pg-boss can open a
+transaction on (the built-in pool supports this). It cannot be combined with
+`perJobResults`, and some backends do not support it together with heartbeats.
+Each in-flight handler holds a pool connection, so size the pool accordingly.
+Use `transactionTimeoutSeconds` to bound the database-side transaction.
+
 ## Events and errors
 
 `PgBoss` exposes queue reads and event streams:
@@ -127,6 +184,12 @@ layer or `Effect.scoped`.
 - `queue.toLayer` — creates the queue
 - `Worker.make(queue, options?, handler)`
 - `worker.toLayer` — registers the worker
+- `PgBossTransaction` — transaction handle passed to transactional workers
+
+pg-boss public types such as `Job`, `JobWithMetadata`, `SendOptions`,
+`WorkOptions`, `QueueResult`, and `Db` are re-exported unchanged. The pg-boss
+`Queue` and `PgBoss` types are not re-exported because they collide with this
+package's exports; import them directly from `pg-boss`.
 
 The pg-boss internals used by `Queue` and `Worker` are not exported.
 

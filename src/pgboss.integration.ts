@@ -20,6 +20,8 @@ const TestPayload = Schema.Struct({
   label: Schema.String,
 });
 
+const TxPayload = Schema.Struct({ label: Schema.String });
+
 const roundTripQueue = Queue.make("roundtrip", {
   payload: TestPayload,
   queueOptions: { retryLimit: 0 },
@@ -56,6 +58,40 @@ layer(TestLayer, { excludeTestServices: true })("pgboss-effect", (it) => {
         expect(job.data.label).toBe("hello");
         expect(typeof job.id).toBe("string");
       }
+    }),
+  );
+
+  it.effect("runs a transactional worker with a usable transaction", () =>
+    Effect.gen(function* () {
+      const rowsDeferred = yield* Deferred.make<ReadonlyArray<unknown>>();
+      const txQueue = Queue.make(`tx-${randomUUID()}`, {
+        payload: TxPayload,
+        queueOptions: { retryLimit: 0 },
+      });
+      const WorkerLayer = Worker.make(
+        txQueue,
+        { transactional: true, pollingIntervalSeconds: 0.5 },
+        (job, transaction) =>
+          Effect.gen(function* () {
+            const rows = yield* transaction.executeSql(
+              "SELECT $1::text AS label",
+              [job.data.label],
+            );
+            yield* Deferred.succeed(rowsDeferred, rows);
+            return rows;
+          }),
+      ).toLayer.pipe(Layer.provide(txQueue.toLayer));
+
+      yield* Effect.scoped(Effect.provide(Effect.void, WorkerLayer));
+
+      const jobId = yield* txQueue.send({ label: "transactional" });
+      expect(jobId).not.toBeNull();
+
+      const rows = yield* Deferred.await(rowsDeferred).pipe(
+        Effect.timeout("10 seconds"),
+        Effect.catchTag("TimeoutError", () => Effect.succeed(null)),
+      );
+      expect(rows).toEqual([{ label: "transactional" }]);
     }),
   );
 

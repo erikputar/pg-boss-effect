@@ -1,5 +1,6 @@
 import { describe, it } from "@effect/vitest";
 import { Context, Effect, Layer, Schema } from "effect";
+import type { Db } from "pg-boss";
 import { expect } from "vitest";
 
 import { PgBossInternal } from "./pgBossInternal";
@@ -111,6 +112,23 @@ describe("send", () => {
 
         expect(state.sendCalls).toEqual([
           ["example", { hello: "world" }, { retryLimit: 3, retryDelay: 5 }],
+        ]);
+      }),
+    ),
+  );
+
+  it.effect("forwards a transaction through send options", () =>
+    provideFake(
+      Effect.gen(function* () {
+        const state = yield* PgBossFakeState;
+        const db: Db = {
+          executeSql: () => Promise.resolve({ rows: [] }),
+        };
+
+        yield* exampleQueue.send({ hello: "world" }, { db });
+
+        expect(state.sendCalls).toEqual([
+          ["example", { hello: "world" }, { db }],
         ]);
       }),
     ),

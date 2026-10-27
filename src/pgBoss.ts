@@ -14,7 +14,6 @@ export {
   type PgBossOptions,
   type PgBossService,
   QueueNotFoundError,
-  type QueueResult,
 } from "./pgBossInternal";
 
 export class PgBoss extends Context.Service<PgBoss, PgBossService>()("PgBoss") {
