@@ -3,10 +3,11 @@ import type {
   Db,
   Job,
   JobWithMetadata,
+  PgBossRuntimeError,
   PgBossTransaction,
-  QueueError,
   QueueResult,
   QueueSchedule,
+  QueueScheduleError,
   SendOptions,
   WorkOptions,
 } from "pgboss-effect";
@@ -118,11 +119,14 @@ const WorkerLive = worker.toLayer.pipe(
   Layer.provideMerge(PgBossLive),
 );
 
-const TransactionalWorkerLive: Layer.Layer<never, QueueError, never> =
-  transactionalWorker.toLayer.pipe(
-    Layer.provide(queue.toLayer),
-    Layer.provideMerge(PgBossLive),
-  );
+const TransactionalWorkerLive: Layer.Layer<
+  never,
+  QueueScheduleError | PgBossRuntimeError,
+  never
+> = transactionalWorker.toLayer.pipe(
+  Layer.provide(queue.toLayer),
+  Layer.provideMerge(PgBossLive),
+);
 
 const send = queue.send({ message: "hello" }).pipe(Effect.provide(QueueLive));
 

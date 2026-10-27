@@ -18,6 +18,7 @@ type PgBossFakeStateShape = {
   readonly workCalls: Array<[string, WorkOptions | undefined]>;
   readonly workHandlers: Map<string, WorkHandler>;
   readonly workErrors: Array<unknown>;
+  readonly offWorkCalls: Array<[string, unknown?]>;
 };
 
 class PgBossFakeState extends Context.Service<
@@ -30,6 +31,7 @@ const PgBossState = Layer.sync(PgBossFakeState, () => ({
   workCalls: [],
   workHandlers: new Map<string, WorkHandler>(),
   workErrors: [],
+  offWorkCalls: [],
 }));
 
 const PgBossFake = Layer.effect(
@@ -46,6 +48,10 @@ const PgBossFake = Layer.effect(
       unschedule: () => Effect.void,
       getSchedules: () => Effect.succeed([]),
       getSchedule: () => Effect.succeed(null),
+      offWork: (name: string, options?: unknown) =>
+        Effect.sync(() => {
+          state.offWorkCalls.push([name, options]);
+        }),
       work: <A, E, R>(
         name: string,
         handler: (
@@ -383,6 +389,20 @@ describe("Worker.make", () => {
           expect(seen).toHaveLength(2);
         }),
       ),
+  );
+
+  it.effect("stops the worker when its layer scope closes", () =>
+    provideFake(
+      Effect.gen(function* () {
+        const state = yield* PgBossFakeState;
+
+        yield* provideWorker(Worker.make(exampleQueue, () => Effect.void));
+
+        expect(state.offWorkCalls).toEqual([
+          ["example", { id: "worker-id", wait: true }],
+        ]);
+      }),
+    ),
   );
 
   it.effect(

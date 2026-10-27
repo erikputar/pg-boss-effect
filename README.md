@@ -93,6 +93,8 @@ const WorkerLive = EmailWorker.toLayer.pipe(
 Effect.runFork(Layer.launch(WorkerLive));
 ```
 
+Closing the worker layer scope stops the worker with a graceful `offWork`.
+
 ## Job metadata
 
 Pass `includeMetadata: true` to receive pg-boss job metadata in the handler:
@@ -224,6 +226,42 @@ layer or `Effect.scoped`.
 - `PgBoss.events` has streams for `error`, `warning`, `wip`, `stopped`, `bam`,
   and `flow`.
 - `getQueues` and `getQueue` read queue state.
+
+## Typed errors
+
+Errors that callers can act on are tagged Effect errors:
+
+- `QueueNotFoundError` — missing queue
+- `DeadLetterQueueNotFoundError` — missing dead-letter queue
+- `InvalidScheduleError` — invalid cron/RRULE, timezone, or preview options
+- `QueuePayloadSchemaError` / `WorkerJobPayloadSchemaError` — payload schema failures
+- `PgBossConfigError` — invalid instance configuration
+- `PgBossNotInstalledError` / `PgBossMigrationsRequiredError` — startup schema checks
+- `PgBossDatabaseError` — transaction SQL failures, including PostgreSQL `code`
+
+```ts
+const error = yield* queue
+  .send(data, { deadLetter: "missing-dlq" })
+  .pipe(Effect.flip);
+
+if (error instanceof DeadLetterQueueNotFoundError) {
+  console.error(`missing ${error.deadLetterQueue}`);
+}
+```
+
+Inside a transactional worker, SQLSTATE is available:
+
+```ts
+const error = yield* transaction
+  .executeSql("INSERT ...", [value])
+  .pipe(Effect.flip);
+
+if (error instanceof PgBossDatabaseError && error.code === "23505") {
+  // unique violation
+}
+```
+
+`PgBossError` remains the fallback for uncategorized pg-boss failures.
 
 ## API
 

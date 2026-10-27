@@ -8,6 +8,10 @@ import type {
   SendOptions,
 } from "pg-boss";
 
+import type {
+  DeadLetterQueueNotFoundError,
+  InvalidScheduleError,
+} from "./errors";
 import {
   type PgBossError,
   PgBossInternal,
@@ -24,7 +28,10 @@ export class QueuePayloadSchemaError extends Data.TaggedError(
 export type QueueError =
   | PgBossError
   | QueueNotFoundError
-  | QueuePayloadSchemaError;
+  | QueuePayloadSchemaError
+  | DeadLetterQueueNotFoundError;
+
+export type QueueScheduleError = QueueError | InvalidScheduleError;
 
 export type TypedJob<A> = Omit<Job, "data"> & { data: A };
 
@@ -48,7 +55,7 @@ export interface Queue<
   readonly schedules:
     | Readonly<Record<string, QueueSchedule<Payload["Type"]>>>
     | undefined;
-  readonly toLayer: Layer.Layer<never, QueueError, PgBossInternal>;
+  readonly toLayer: Layer.Layer<never, QueueScheduleError, PgBossInternal>;
   readonly send: (
     data: Payload["Type"],
     options?: SendOptions,
@@ -80,7 +87,11 @@ export const Queue = {
       >;
     },
   ): Queue<Name, Payload> => {
-    const register = (): Effect.Effect<void, QueueError, PgBossInternal> =>
+    const register = (): Effect.Effect<
+      void,
+      QueueScheduleError,
+      PgBossInternal
+    > =>
       Effect.gen(function* () {
         const { createQueue, schedule } = yield* PgBossInternal;
         yield* createQueue(name, options.queueOptions);

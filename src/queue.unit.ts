@@ -70,6 +70,7 @@ const PgBossFake = Layer.effect(
           state.getScheduleCalls.push([name, key]);
           return state.getScheduleResult;
         }),
+      offWork: () => Effect.void,
       work: () => Effect.succeed("worker-id"),
     });
   }),

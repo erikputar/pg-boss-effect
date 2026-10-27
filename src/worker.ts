@@ -265,10 +265,21 @@ const makeWorker = <
       : config.options;
 
   const toLayer = Layer.effectDiscard(
-    Effect.gen(function* () {
-      const { work } = yield* PgBossInternal;
-      yield* work(queue.name, handleJobs, workOptions);
-    }),
+    Effect.acquireRelease(
+      Effect.gen(function* () {
+        const { work } = yield* PgBossInternal;
+        return yield* work(queue.name, handleJobs, workOptions);
+      }),
+      (workerId) =>
+        Effect.gen(function* () {
+          const { offWork } = yield* PgBossInternal;
+          yield* offWork(queue.name, { id: workerId, wait: true });
+        }).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logError("failed to stop worker", cause),
+          ),
+        ),
+    ),
   );
 
   return { queue, toLayer } as const;

@@ -11,6 +11,14 @@ import type {
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  DeadLetterQueueNotFoundError,
+  InvalidScheduleError,
+  PgBossConfigError,
+  PgBossDatabaseError,
+  PgBossMigrationsRequiredError,
+  PgBossNotInstalledError,
+} from "./errors";
+import {
   PgBoss,
   PgBossError,
   type PgBossOptions,
@@ -25,6 +33,9 @@ const { fakePgBoss, PgBossMock } = vi.hoisted(() => {
   class PgBossMock {
     constructor(options: PgBossOptions) {
       fakePgBoss.constructorOptions = options;
+      if (fakePgBoss.constructorError !== undefined) {
+        throw fakePgBoss.constructorError;
+      }
     }
 
     on(event: string, listener: Listener) {
@@ -43,6 +54,9 @@ const { fakePgBoss, PgBossMock } = vi.hoisted(() => {
 
     start() {
       fakePgBoss.startCalls += 1;
+      if (fakePgBoss.startError !== undefined) {
+        return Promise.reject(fakePgBoss.startError);
+      }
       return Promise.resolve(this);
     }
 
@@ -152,14 +166,24 @@ const { fakePgBoss, PgBossMock } = vi.hoisted(() => {
       }
       return fakePgBoss.previewScheduleResult;
     }
+
+    offWork(name: string, options?: unknown) {
+      fakePgBoss.offWorkCalls.push([name, options]);
+      if (fakePgBoss.offWorkError !== undefined) {
+        return Promise.reject(fakePgBoss.offWorkError);
+      }
+      return Promise.resolve();
+    }
   }
 
   const fakePgBoss = {
     listeners: new Map<string, Set<Listener>>(),
     constructorOptions: undefined as PgBossOptions | undefined,
+    constructorError: undefined as unknown,
     onCalls: [] as Array<[string, Listener]>,
     offCalls: [] as Array<[string, Listener]>,
     startCalls: 0,
+    startError: undefined as unknown,
     stopCalls: 0,
     createQueueCalls: [] as Array<[string, unknown?]>,
     createQueueError: undefined as unknown,
@@ -188,6 +212,8 @@ const { fakePgBoss, PgBossMock } = vi.hoisted(() => {
     >,
     previewScheduleError: undefined as unknown,
     previewScheduleResult: [] as Date[],
+    offWorkCalls: [] as Array<[string, unknown?]>,
+    offWorkError: undefined as unknown,
 
     emit(event: string, ...args: unknown[]) {
       for (const listener of this.listeners.get(event) ?? []) {
@@ -198,9 +224,11 @@ const { fakePgBoss, PgBossMock } = vi.hoisted(() => {
     reset() {
       this.listeners = new Map();
       this.constructorOptions = undefined;
+      this.constructorError = undefined;
       this.onCalls = [];
       this.offCalls = [];
       this.startCalls = 0;
+      this.startError = undefined;
       this.stopCalls = 0;
       this.createQueueCalls = [];
       this.createQueueError = undefined;
@@ -227,6 +255,8 @@ const { fakePgBoss, PgBossMock } = vi.hoisted(() => {
       this.previewScheduleCalls = [];
       this.previewScheduleError = undefined;
       this.previewScheduleResult = [];
+      this.offWorkCalls = [];
+      this.offWorkError = undefined;
     },
   };
 
@@ -253,6 +283,13 @@ const runWithPgBoss = <A, E>(
 ) =>
   Effect.runPromise(
     Effect.scoped(effect.pipe(Effect.provide(PgBoss.layer(options)))),
+  );
+
+const runWithPgBossError = (options: PgBossOptions = objectOptions) =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.flip(Effect.provide(Effect.void, PgBoss.layer(options))),
+    ),
   );
 
 const invokeWork = (jobs: PgBossJob[], db?: Db) =>
@@ -472,8 +509,12 @@ describe("PgBoss", () => {
     expect(executeSql).toHaveBeenCalledWith("SELECT 42", undefined);
   });
 
-  it("maps transaction SQL failures to PgBossError", async () => {
-    const cause = new Error("boom");
+  it("maps transaction SQL failures to PgBossDatabaseError", async () => {
+    const cause = Object.assign(new Error("duplicate"), {
+      code: "23505",
+      constraint: "job_pkey",
+      detail: "Key (id)=(1) already exists.",
+    });
     const db: Db = {
       executeSql: () => Promise.reject(cause),
     };
@@ -494,9 +535,12 @@ describe("PgBoss", () => {
       }),
     );
 
-    expect(result).toBeInstanceOf(PgBossError);
-    if (result instanceof PgBossError) {
+    expect(result).toBeInstanceOf(PgBossDatabaseError);
+    if (result instanceof PgBossDatabaseError) {
       expect(result.cause).toBe(cause);
+      expect(result.code).toBe("23505");
+      expect(result.constraint).toBe("job_pkey");
+      expect(result.detail).toBe("Key (id)=(1) already exists.");
     }
   });
 
@@ -762,7 +806,7 @@ describe("PgBoss", () => {
     ]);
   });
 
-  it("previewSchedule maps failures to PgBossError", async () => {
+  it("previewSchedule maps failures to InvalidScheduleError", async () => {
     fakePgBoss.previewScheduleError = new Error("invalid cron");
 
     const error = await runWithPgBoss(
@@ -774,6 +818,115 @@ describe("PgBoss", () => {
       ),
     );
 
-    expect(error).toBeInstanceOf(PgBossError);
+    expect(error).toBeInstanceOf(InvalidScheduleError);
+  });
+
+  it("maps constructor failures to PgBossConfigError", async () => {
+    fakePgBoss.constructorError = new Error("bad config");
+
+    const error = await runWithPgBossError();
+
+    expect(error).toBeInstanceOf(PgBossConfigError);
+  });
+
+  it("maps not-installed startup failures", async () => {
+    fakePgBoss.startError = new Error("pg-boss is not installed");
+
+    const error = await runWithPgBossError();
+
+    expect(error).toBeInstanceOf(PgBossNotInstalledError);
+  });
+
+  it("maps migration startup failures", async () => {
+    fakePgBoss.startError = new Error("pg-boss database requires migrations");
+
+    const error = await runWithPgBossError();
+
+    expect(error).toBeInstanceOf(PgBossMigrationsRequiredError);
+  });
+
+  it("maps a missing dead letter queue during queue creation", async () => {
+    fakePgBoss.createQueueError = new Error("Queue missing-dlq does not exist");
+
+    const error = await runWithPgBoss(
+      Effect.flip(
+        Effect.gen(function* () {
+          const { createQueue } = yield* PgBossInternal;
+          yield* createQueue("source", { deadLetter: "missing-dlq" });
+        }),
+      ),
+    );
+
+    expect(error).toBeInstanceOf(DeadLetterQueueNotFoundError);
+    if (error instanceof DeadLetterQueueNotFoundError) {
+      expect(error.queue).toBe("source");
+      expect(error.deadLetterQueue).toBe("missing-dlq");
+    }
+  });
+
+  it("maps a missing dead letter queue during send", async () => {
+    fakePgBoss.sendError = new Error(
+      "Dead letter queue missing-dlq does not exist",
+    );
+
+    const error = await runWithPgBoss(
+      Effect.flip(
+        Effect.gen(function* () {
+          const { send } = yield* PgBossInternal;
+          yield* send("source", { hello: "world" });
+        }),
+      ),
+    );
+
+    expect(error).toBeInstanceOf(DeadLetterQueueNotFoundError);
+    if (error instanceof DeadLetterQueueNotFoundError) {
+      expect(error.queue).toBe("source");
+      expect(error.deadLetterQueue).toBe("missing-dlq");
+    }
+  });
+
+  it("maps invalid schedule errors", async () => {
+    fakePgBoss.scheduleError = new Error("Invalid characters, got value: a");
+
+    const error = await runWithPgBoss(
+      Effect.flip(
+        Effect.gen(function* () {
+          const { schedule } = yield* PgBossInternal;
+          yield* schedule("test-queue", "not a cron");
+        }),
+      ),
+    );
+
+    expect(error).toBeInstanceOf(InvalidScheduleError);
+  });
+
+  it("maps assertion schedule errors", async () => {
+    fakePgBoss.scheduleError = Object.assign(new Error("bad missed"), {
+      code: "ERR_ASSERTION",
+    });
+
+    const error = await runWithPgBoss(
+      Effect.flip(
+        Effect.gen(function* () {
+          const { schedule } = yield* PgBossInternal;
+          yield* schedule("test-queue", "0 0 * * *");
+        }),
+      ),
+    );
+
+    expect(error).toBeInstanceOf(InvalidScheduleError);
+  });
+
+  it("passes offWork through to pg-boss", async () => {
+    await runWithPgBoss(
+      Effect.gen(function* () {
+        const { offWork } = yield* PgBossInternal;
+        yield* offWork("test-queue", { id: "worker-id", wait: false });
+      }),
+    );
+
+    expect(fakePgBoss.offWorkCalls).toEqual([
+      ["test-queue", { id: "worker-id", wait: false }],
+    ]);
   });
 });

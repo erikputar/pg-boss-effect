@@ -12,6 +12,7 @@ export {
   type PgBossEventPayload,
   type PgBossEvents,
   type PgBossOptions,
+  type PgBossRuntimeError,
   type PgBossService,
   QueueNotFoundError,
 } from "./pgBossInternal";
