@@ -112,6 +112,10 @@ const PgBossLive = PgBoss.layer({
   connectionString: "postgresql://pgboss:pgboss@localhost:5435/pgboss",
 });
 
+const PgBossFromStringLive = PgBoss.layer(
+  "postgresql://pgboss:pgboss@localhost:5435/pgboss",
+);
+
 const QueueLive = queue.toLayer.pipe(Layer.provideMerge(PgBossLive));
 
 const WorkerLive = worker.toLayer.pipe(
@@ -141,16 +145,23 @@ const previewSchedules = Effect.gen(function* () {
   return yield* pgBoss.previewSchedule("0 0 * * *", { count: 2 });
 });
 
+const listInstances = Effect.gen(function* () {
+  const pgBoss = yield* PgBoss;
+  return yield* pgBoss.getInstances();
+});
+
 const workerProgram = Layer.launch(WorkerLive);
 const transactionalWorkerProgram = Layer.launch(TransactionalWorkerLive);
 
 export {
+  PgBossFromStringLive,
   batchMetadataWorker,
   batchTransactionalWorker,
   invalidMetadataWorker,
   invalidPerJobResults,
   invalidScheduledQueue,
   invalidTransactionTimeout,
+  listInstances,
   metadataWorker,
   previewSchedules,
   scheduleProgram,

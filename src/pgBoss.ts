@@ -18,7 +18,7 @@ export {
 } from "./pgBossInternal";
 
 export class PgBoss extends Context.Service<PgBoss, PgBossService>()("PgBoss") {
-  static layer(options: PgBossOptions) {
+  static layer(options: PgBossOptions | string) {
     return Layer.unwrap(
       Effect.map(makeRuntime(options), (runtime) =>
         Layer.mergeAll(

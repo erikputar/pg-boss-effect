@@ -2,6 +2,7 @@ import { Context, Data, Effect, PubSub, type Scope, Stream } from "effect";
 import {
   type ConstructorOptions,
   type Db,
+  type Instance,
   type OffWorkOptions,
   type PgBossEventMap,
   type Job as PgBossJob,
@@ -100,6 +101,11 @@ export interface PgBossService {
     expression: string,
     options?: PreviewScheduleOptions,
   ) => Effect.Effect<ReadonlyArray<Date>, InvalidScheduleError>;
+
+  readonly getInstances: () => Effect.Effect<
+    ReadonlyArray<Instance>,
+    PgBossError
+  >;
 }
 
 export interface PgBossInternalService {
@@ -168,12 +174,15 @@ export interface PgBossRuntime {
 }
 
 export const makeRuntime = (
-  options: PgBossOptions,
+  options: PgBossOptions | string,
 ): Effect.Effect<PgBossRuntime, PgBossRuntimeError, Scope.Scope> =>
   Effect.gen(function* () {
     const context = yield* Effect.context();
     const pgBoss = yield* Effect.try({
-      try: () => new _PgBoss(options),
+      try: () =>
+        typeof options === "string"
+          ? new _PgBoss(options)
+          : new _PgBoss(options),
       catch: (cause) => new PgBossConfigError({ cause }),
     });
 
@@ -356,6 +365,12 @@ export const makeRuntime = (
         catch: (cause) => new InvalidScheduleError({ expression, cause }),
       });
 
+    const getInstances = () =>
+      Effect.tryPromise({
+        try: () => pgBoss.getInstances(),
+        catch: (cause) => new PgBossError({ cause }),
+      });
+
     const makeTransaction = (db: Db): PgBossTransaction => ({
       db,
       executeSql: (text, values) =>
@@ -422,6 +437,7 @@ export const makeRuntime = (
       errors: events.error,
       warnings: events.warning,
       previewSchedule,
+      getInstances,
     };
 
     return { internal, public: publicService };

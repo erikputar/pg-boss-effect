@@ -6,7 +6,7 @@ Simple and type-safe pg-boss queues and workers in Effect.
 
 - Node.js >= 22.12
 - Effect 4
-- pg-boss >= 12.32
+- pg-boss >= 12.38
 
 ## Install
 
@@ -63,6 +63,14 @@ Effect.runFork(program);
 
 `EmailsQueue.toLayer` creates the queue. `PgBoss.layer` owns the pg-boss
 instance and its lifetime.
+
+`PgBoss.layer` also accepts a connection string directly:
+
+```ts
+const PgBossLive = PgBoss.layer(
+  "postgresql://postgres:postgres@localhost:5432/app",
+);
+```
 
 ## Run a worker
 
@@ -226,6 +234,7 @@ layer or `Effect.scoped`.
 - `PgBoss.events` has streams for `error`, `warning`, `wip`, `stopped`, `bam`,
   and `flow`.
 - `getQueues` and `getQueue` read queue state.
+- `getInstances` reads the cross-process instance/worker registry and metrics.
 
 ## Typed errors
 
@@ -265,7 +274,7 @@ if (error instanceof PgBossDatabaseError && error.code === "23505") {
 
 ## API
 
-- `PgBoss.layer(options)` — pg-boss instance layer
+- `PgBoss.layer(options | connectionString)` — pg-boss instance layer
 - `Queue.make(name, { payload, queueOptions, schedules })`
 - `queue.send(data, options?)`
 - `queue.toLayer` — creates the queue and registers its schedules
@@ -273,10 +282,11 @@ if (error instanceof PgBossDatabaseError && error.code === "23505") {
 - `Worker.make(queue, options?, handler)`
 - `worker.toLayer` — registers the worker
 - `PgBoss.previewSchedule(expression, options?)`
+- `PgBoss.getInstances()` — registered instances and worker health
 - `PgBossTransaction` — transaction handle passed to transactional workers
 
 pg-boss public types such as `Job`, `JobWithMetadata`, `SendOptions`,
-`WorkOptions`, `QueueResult`, and `Db` are re-exported unchanged. The pg-boss
+`WorkOptions`, `QueueResult`, `Db`, and `Instance` are re-exported unchanged. The pg-boss
 `Queue` and `PgBoss` types are not re-exported because they collide with this
 package's exports; import them directly from `pg-boss`.
 

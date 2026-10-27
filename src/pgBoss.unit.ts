@@ -1,6 +1,7 @@
 import { Deferred, Effect, Stream } from "effect";
 import type {
   Db,
+  Instance,
   Job as PgBossJob,
   PreviewScheduleOptions,
   QueueResult,
@@ -31,7 +32,7 @@ type Listener = (...args: unknown[]) => void;
 
 const { fakePgBoss, PgBossMock } = vi.hoisted(() => {
   class PgBossMock {
-    constructor(options: PgBossOptions) {
+    constructor(options: PgBossOptions | string) {
       fakePgBoss.constructorOptions = options;
       if (fakePgBoss.constructorError !== undefined) {
         throw fakePgBoss.constructorError;
@@ -174,11 +175,19 @@ const { fakePgBoss, PgBossMock } = vi.hoisted(() => {
       }
       return Promise.resolve();
     }
+
+    getInstances() {
+      fakePgBoss.getInstancesCalls += 1;
+      if (fakePgBoss.getInstancesError !== undefined) {
+        return Promise.reject(fakePgBoss.getInstancesError);
+      }
+      return Promise.resolve(fakePgBoss.getInstancesResult);
+    }
   }
 
   const fakePgBoss = {
     listeners: new Map<string, Set<Listener>>(),
-    constructorOptions: undefined as PgBossOptions | undefined,
+    constructorOptions: undefined as PgBossOptions | string | undefined,
     constructorError: undefined as unknown,
     onCalls: [] as Array<[string, Listener]>,
     offCalls: [] as Array<[string, Listener]>,
@@ -214,6 +223,9 @@ const { fakePgBoss, PgBossMock } = vi.hoisted(() => {
     previewScheduleResult: [] as Date[],
     offWorkCalls: [] as Array<[string, unknown?]>,
     offWorkError: undefined as unknown,
+    getInstancesCalls: 0,
+    getInstancesError: undefined as unknown,
+    getInstancesResult: [] as Instance[],
 
     emit(event: string, ...args: unknown[]) {
       for (const listener of this.listeners.get(event) ?? []) {
@@ -257,6 +269,9 @@ const { fakePgBoss, PgBossMock } = vi.hoisted(() => {
       this.previewScheduleResult = [];
       this.offWorkCalls = [];
       this.offWorkError = undefined;
+      this.getInstancesCalls = 0;
+      this.getInstancesError = undefined;
+      this.getInstancesResult = [];
     },
   };
 
@@ -279,13 +294,13 @@ const connectionStringOptions: PgBossOptions = {
 
 const runWithPgBoss = <A, E>(
   effect: Effect.Effect<A, E, PgBoss | PgBossInternal>,
-  options: PgBossOptions = objectOptions,
+  options: PgBossOptions | string = objectOptions,
 ) =>
   Effect.runPromise(
     Effect.scoped(effect.pipe(Effect.provide(PgBoss.layer(options)))),
   );
 
-const runWithPgBossError = (options: PgBossOptions = objectOptions) =>
+const runWithPgBossError = (options: PgBossOptions | string = objectOptions) =>
   Effect.runPromise(
     Effect.scoped(
       Effect.flip(Effect.provide(Effect.void, PgBoss.layer(options))),
@@ -327,6 +342,14 @@ describe("PgBoss", () => {
     await runWithPgBoss(Effect.void, connectionStringOptions);
 
     expect(fakePgBoss.constructorOptions).toEqual(connectionStringOptions);
+  });
+
+  it("accepts a connection string directly", async () => {
+    const connectionString = "postgresql://user:pass@localhost:5432/direct";
+
+    await runWithPgBoss(Effect.void, connectionString);
+
+    expect(fakePgBoss.constructorOptions).toBe(connectionString);
   });
 
   it("registers every event listener", async () => {
@@ -704,6 +727,33 @@ describe("PgBoss", () => {
     );
 
     expect(queue).toBeNull();
+  });
+
+  it("getInstances returns registered instances", async () => {
+    const instances = await runWithPgBoss(
+      Effect.gen(function* () {
+        const { getInstances } = yield* PgBoss;
+        return yield* getInstances();
+      }),
+    );
+
+    expect(instances).toEqual([]);
+    expect(fakePgBoss.getInstancesCalls).toBe(1);
+  });
+
+  it("getInstances maps failures to PgBossError", async () => {
+    fakePgBoss.getInstancesError = new Error("boom");
+
+    const error = await runWithPgBoss(
+      Effect.flip(
+        Effect.gen(function* () {
+          const { getInstances } = yield* PgBoss;
+          yield* getInstances();
+        }),
+      ),
+    );
+
+    expect(error).toBeInstanceOf(PgBossError);
   });
 
   it("getQueues maps failures to PgBossError", async () => {

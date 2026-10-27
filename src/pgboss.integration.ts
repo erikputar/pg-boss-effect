@@ -253,6 +253,16 @@ layer(TestLayer, { excludeTestServices: true })("pgboss-effect", (it) => {
     }),
   );
 
+  it.effect("returns registered pg-boss instances", () =>
+    Effect.gen(function* () {
+      const { getInstances } = yield* PgBoss;
+      const instances = yield* getInstances();
+
+      expect(instances.length).toBeGreaterThan(0);
+      expect(instances.some((instance) => instance.live)).toBe(true);
+    }),
+  );
+
   it.effect("maps a missing queue to QueueNotFoundError", () =>
     Effect.gen(function* () {
       const missingQueue = Queue.make(`missing-${randomUUID()}`, {
